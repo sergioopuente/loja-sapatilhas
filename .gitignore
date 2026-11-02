@@ -1,0 +1,28 @@
+# Segredos e configuração local
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# Docker
+docker-compose.override.yml
+
+# IDEs e sistema operativo
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

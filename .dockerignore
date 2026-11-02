@@ -1,0 +1,10 @@
+.git
+.env
+.env.*
+!.env.example
+docs
+frontend
+gateway
+**/__pycache__
+**/.pytest_cache
+**/.venv

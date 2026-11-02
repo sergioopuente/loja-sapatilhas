@@ -1,0 +1,164 @@
+name: loja-sapatilhas
+
+x-service-healthcheck: &service-healthcheck
+  # python:3.12-slim não inclui curl nem wget
+  test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
+  interval: 5s
+  timeout: 3s
+  retries: 12
+  start_period: 10s
+
+x-postgres-healthcheck: &postgres-healthcheck
+  test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+  interval: 5s
+  timeout: 3s
+  retries: 12
+  start_period: 10s
+
+services:
+  gateway:
+    image: nginx:1.28-alpine
+    ports:
+      - "${GATEWAY_PORT:?}:80"
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./frontend:/usr/share/nginx/html:ro
+    depends_on:
+      users:
+        condition: service_healthy
+      catalog:
+        condition: service_healthy
+      orders:
+        condition: service_healthy
+      payments:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  users:
+    build:
+      context: .
+      dockerfile: services/users/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://${USERS_DB_USER:?}:${USERS_DB_PASSWORD:?}@users-db:5432/${USERS_DB_NAME:?}
+      JWT_SECRET: ${JWT_SECRET:?}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:?}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:?}
+    depends_on:
+      users-db:
+        condition: service_healthy
+    healthcheck: *service-healthcheck
+
+  catalog:
+    build:
+      context: .
+      dockerfile: services/catalog/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://${CATALOG_DB_USER:?}:${CATALOG_DB_PASSWORD:?}@catalog-db:5432/${CATALOG_DB_NAME:?}
+      JWT_SECRET: ${JWT_SECRET:?}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:?}
+    depends_on:
+      catalog-db:
+        condition: service_healthy
+    healthcheck: *service-healthcheck
+
+  orders:
+    build:
+      context: .
+      dockerfile: services/orders/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://${ORDERS_DB_USER:?}:${ORDERS_DB_PASSWORD:?}@orders-db:5432/${ORDERS_DB_NAME:?}
+      JWT_SECRET: ${JWT_SECRET:?}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:?}
+      NATS_URL: nats://nats:4222
+      CATALOG_URL: http://catalog:8000
+    depends_on:
+      orders-db:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      catalog:
+        condition: service_healthy
+    healthcheck: *service-healthcheck
+
+  payments:
+    build:
+      context: .
+      dockerfile: services/payments/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://${PAYMENTS_DB_USER:?}:${PAYMENTS_DB_PASSWORD:?}@payments-db:5432/${PAYMENTS_DB_NAME:?}
+      JWT_SECRET: ${JWT_SECRET:?}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:?}
+      NATS_URL: nats://nats:4222
+      ORDERS_URL: http://orders:8000
+    depends_on:
+      payments-db:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      orders:
+        condition: service_healthy
+    healthcheck: *service-healthcheck
+
+  users-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${USERS_DB_NAME:?}
+      POSTGRES_USER: ${USERS_DB_USER:?}
+      POSTGRES_PASSWORD: ${USERS_DB_PASSWORD:?}
+    volumes:
+      - users-db-data:/var/lib/postgresql/data
+    healthcheck: *postgres-healthcheck
+
+  catalog-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${CATALOG_DB_NAME:?}
+      POSTGRES_USER: ${CATALOG_DB_USER:?}
+      POSTGRES_PASSWORD: ${CATALOG_DB_PASSWORD:?}
+    volumes:
+      - catalog-db-data:/var/lib/postgresql/data
+    healthcheck: *postgres-healthcheck
+
+  orders-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${ORDERS_DB_NAME:?}
+      POSTGRES_USER: ${ORDERS_DB_USER:?}
+      POSTGRES_PASSWORD: ${ORDERS_DB_PASSWORD:?}
+    volumes:
+      - orders-db-data:/var/lib/postgresql/data
+    healthcheck: *postgres-healthcheck
+
+  payments-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${PAYMENTS_DB_NAME:?}
+      POSTGRES_USER: ${PAYMENTS_DB_USER:?}
+      POSTGRES_PASSWORD: ${PAYMENTS_DB_PASSWORD:?}
+    volumes:
+      - payments-db-data:/var/lib/postgresql/data
+    healthcheck: *postgres-healthcheck
+
+  nats:
+    image: nats:2.11-alpine
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8222/healthz?js-enabled-only=true"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+volumes:
+  users-db-data:
+  catalog-db-data:
+  orders-db-data:
+  payments-db-data:
+  nats-data:
